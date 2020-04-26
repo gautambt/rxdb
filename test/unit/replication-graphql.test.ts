@@ -28,6 +28,8 @@ import {
     GraphQLServerModule
 } from '../helper/graphql-server';
 
+RxDB.plugin(require('pouchdb-adapter-memory'));
+
 RxDB.plugin(GraphQLPlugin);
 
 import GraphQLClient from 'graphql-client';
@@ -2030,31 +2032,50 @@ describe('replication-graphql.test.js', () => {
                 server.close();
                 db.destroy();
             });
-            it('#2048 GraphQL .run() fires exponentially', async () => {
-                const c = await humansCollection.createHumanWithTimestamp(0);
-                const server = await SpawnServer.spawn(getTestData(1));
+            it('#2048 GraphQL .run() fires exponentially on push errors', async () => {
+                const [c, server] = await Promise.all([
+                    humansCollection.createHumanWithTimestamp(batchSize),
+                    SpawnServer.spawn()
+                ]);
+
+                const pushQueryBuilder = (doc: any) => {
+                    // Note: setHumanFail will error out
+                    const query = `
+                    mutation CreateHuman($human: HumanInput) {
+                        setHumanFail(human: $human) {
+                            id,
+                            updatedAt
+                        }
+                    }
+                    `;
+                    const variables = {
+                        human: doc
+                    };
+
+                    return {
+                        query,
+                        variables
+                    };
+                };
+
 
                 const replicationState = c.syncGraphQL({
                     url: server.url,
-                    pull: {
-                        queryBuilder
+                    push: {
+                        batchSize,
+                        queryBuilder: pushQueryBuilder
                     },
                     live: true,
-                    deletedFlag: 'deleted'
+                    deletedFlag: 'deleted',
+                    retryTime: 500
                 });
-                assert.strictEqual(replicationState._runCount, 0);
 
-                // call run() many times
-                const amount = 100;
-                await Promise.all(
-                    new Array(amount).map(
-                        () => replicationState.run()
-                    )
-                );
+                // We sleep 5000 seconds with retry time set to 500 sec
+                await AsyncTestUtil.wait(5000);
 
-                await AsyncTestUtil.wait(50);
-                assert.ok(replicationState._runCount > 0);
-                assert.ok(replicationState._runCount < amount);
+                // Since push will error out we expect it there to be around 5000/500 = 10 retries
+                assert.ok(replicationState._runCount >= 9, replicationState._runCount);
+                assert.ok(replicationState._runCount <= 11, replicationState._runCount);
 
                 c.database.destroy();
             });

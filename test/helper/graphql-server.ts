@@ -80,6 +80,7 @@ export async function spawn<T>(
         }
         type Mutation {
             setHuman(human: HumanInput): Human
+            setHumanFail(human: HumanInput): Human
         }
         input RevisionInput {
           start: Int!,
@@ -176,6 +177,9 @@ export async function spawn<T>(
                 }
             );
             return doc;
+        },
+        setHumanFail: (args: any) => {
+            throw new Error("Need to fail!")
         },
         humanChanged: () => pubsub.asyncIterator('humanChanged')
     };
